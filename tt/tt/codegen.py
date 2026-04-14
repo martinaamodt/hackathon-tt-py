@@ -76,6 +76,9 @@ _STMT_DISPATCH: dict = {}  # populated after all functions are defined
 def _gen_expr(ctx: CodegenContext, node) -> str:
     """Generate a Python expression string from a TS expression node."""
     ntype = node.type
+    # Skip comments entirely
+    if ntype == "comment":
+        return ""
     # Literals and simple tokens
     result = _gen_expr_literal(ctx, node, ntype)
     if result is not None:
@@ -130,7 +133,8 @@ def _gen_program(ctx: CodegenContext, node) -> str:
 def _gen_export(ctx: CodegenContext, node) -> str:
     parts = []
     for child in node.named_children:
-        if child.type in ("class_declaration", "function_declaration",
+        if child.type in ("class_declaration", "abstract_class_declaration",
+                          "function_declaration",
                           "lexical_declaration", "variable_declaration"):
             parts.append(_gen(ctx, child))
     return "".join(parts)
@@ -179,6 +183,10 @@ def _gen_class_body(ctx: CodegenContext, node) -> str:
         _has_constructor_method(c) for c in node.named_children
     )
     for child in node.named_children:
+        # Skip abstract method signatures and decorators
+        if child.type in ("abstract_method_signature",
+                          "method_signature", "decorator"):
+            continue
         if child.type == "method_definition":
             # Only pass field_inits to constructor, not other methods
             if _has_constructor_method(child):
@@ -327,14 +335,44 @@ def _gen_params(ctx: CodegenContext, node) -> str:
     params = []
     for child in node.named_children:
         if child.type == "required_parameter":
-            params.append(_gen_required_param(child))
+            # Check if the parameter uses destructuring
+            inner = _find_child_type(child, "object_pattern")
+            if inner:
+                params.extend(_extract_object_pattern_params(inner))
+            else:
+                params.append(_gen_required_param(child))
         elif child.type == "optional_parameter":
             params.append(_gen_optional_param(ctx, child))
         elif child.type == "rest_parameter":
             params.append(_gen_rest_param(child))
         elif child.type == "identifier":
             params.append(_to_snake_case(_text(child)))
+        elif child.type == "object_pattern":
+            params.extend(_extract_object_pattern_params(child))
     return ", ".join(params)
+
+
+def _extract_object_pattern_params(node) -> list[str]:
+    """Extract parameter names from an object destructuring pattern."""
+    params = []
+    for child in node.named_children:
+        if child.type == "shorthand_property_identifier_pattern":
+            params.append(_to_snake_case(_text(child)))
+        elif child.type == "pair_pattern":
+            key_node = child.child_by_field_name("key")
+            if key_node:
+                params.append(_to_snake_case(_text(key_node)))
+        elif child.type == "identifier":
+            params.append(_to_snake_case(_text(child)))
+    return params
+
+
+def _find_child_type(node, type_name: str):
+    """Find first child of given type, recursively."""
+    for child in node.children:
+        if child.type == type_name:
+            return child
+    return None
 
 
 def _gen_required_param(node) -> str:
@@ -783,6 +821,8 @@ def _gen_binary_expression(ctx: CodegenContext, node) -> str:
     l = _gen_expr(ctx, left)
     r = _gen_expr(ctx, right)
     if op == "instanceof":
+        if r == "Big":
+            r = "(int, float)"
         return f"isinstance({l}, {r})"
     return f"{l} {py_op} {r}"
 
@@ -878,6 +918,8 @@ def _gen_call_expression(ctx: CodegenContext, node) -> str:
 def _gen_arguments(ctx: CodegenContext, node) -> str:
     args = []
     for child in node.named_children:
+        if child.type == "comment":
+            continue
         args.append(_gen_expr(ctx, child))
     return ", ".join(args)
 
@@ -924,6 +966,8 @@ def _try_builtin_method(ctx, obj_node, obj, method, args, arg_list) -> str | Non
         return _gen_math_call(method, args)
     if _text(obj_node) == "console":
         return f"print({args})"
+    if _text(obj_node) == "Logger":
+        return "pass"
     # Instance methods
     return _try_instance_method(ctx, obj, method, args, arg_list)
 
@@ -1203,12 +1247,60 @@ def _extract_lambda(ctx, fn_node) -> tuple[str, str]:
     """Extract parameter name and body expression from arrow function."""
     if fn_node.type == "arrow_function":
         params = _extract_arrow_params(fn_node)
+        destr = _extract_destructured_keys(fn_node)
+        if destr:
+            # Destructuring param: use a temp var and access via .get()
+            param = "_item"
+            body_node = fn_node.child_by_field_name("body")
+            body = _extract_arrow_body_with_destr(ctx, body_node, destr)
+            return (param, body)
         param = params[0] if params else "x"
         body_node = fn_node.child_by_field_name("body")
         body = _extract_arrow_body(ctx, body_node)
         return (param, body)
     # Identifier reference to a function
     return ("x", f"{_gen_expr(ctx, fn_node)}(x)")
+
+
+def _extract_destructured_keys(fn_node) -> list[str] | None:
+    """If arrow function has a destructured object param, return key names."""
+    for child in fn_node.children:
+        if child.type == "formal_parameters":
+            for p in child.named_children:
+                if p.type == "required_parameter":
+                    for c in p.named_children:
+                        if c.type == "object_pattern":
+                            keys = []
+                            for k in c.named_children:
+                                if k.type == "shorthand_property_identifier_pattern":
+                                    keys.append(_text(k))
+                            return keys if keys else None
+    return None
+
+
+def _extract_arrow_body_with_destr(ctx, body_node, keys: list[str]) -> str:
+    """Extract arrow body, replacing destructured keys with _item.get(key)."""
+    if not body_node:
+        return "None"
+    raw = _extract_arrow_body_raw(ctx, body_node)
+    for key in keys:
+        snake = _to_snake_case(key)
+        raw = raw.replace(snake, f'_item.get("{key}")')
+    return raw
+
+
+def _extract_arrow_body_raw(ctx, body_node) -> str:
+    """Extract raw body expression from arrow function body node."""
+    if body_node.type != "statement_block":
+        return _gen_expr(ctx, body_node)
+    stmts = list(body_node.named_children)
+    if len(stmts) == 1 and stmts[0].type == "return_statement":
+        children = stmts[0].named_children
+        return _gen_expr(ctx, children[0]) if children else "None"
+    if len(stmts) == 1 and stmts[0].type == "expression_statement":
+        children = stmts[0].named_children
+        return _gen_expr(ctx, children[0]) if children else "None"
+    return "None"
 
 
 def _extract_arrow_params(fn_node) -> list[str]:
@@ -1474,6 +1566,8 @@ def _gen_template_string(ctx: CodegenContext, node) -> str:
         elif child.type == "escape_sequence":
             parts.append(_text(child))
     content = "".join(parts)
+    if "\n" in content:
+        return 'f"""' + content + '"""'
     return f'f"{content}"'
 
 
@@ -1584,6 +1678,7 @@ _STMT_DISPATCH.update({
     "program": _gen_program,
     "export_statement": _gen_export,
     "class_declaration": _gen_class,
+    "abstract_class_declaration": _gen_class,
     "method_definition": _gen_method,
     "function_declaration": _gen_function,
     "for_in_statement": _gen_for_in,
