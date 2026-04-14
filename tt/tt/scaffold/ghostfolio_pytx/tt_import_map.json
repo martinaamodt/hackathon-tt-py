@@ -1,0 +1,129 @@
+{
+  "project_name": "ghostfolio",
+  "source_root": "projects/ghostfolio",
+  "output_root": "translations/ghostfolio_pytx/app/implementation",
+  "files": [
+    {
+      "source": "apps/api/src/app/portfolio/calculator/portfolio-calculator.ts",
+      "output": "portfolio/calculator/portfolio_calculator_base.py",
+      "role": "base_class"
+    },
+    {
+      "source": "apps/api/src/app/portfolio/calculator/roai/portfolio-calculator.ts",
+      "output": "portfolio/calculator/roai/portfolio_calculator.py",
+      "role": "main_calculator"
+    },
+    {
+      "source": "apps/api/src/helper/portfolio.helper.ts",
+      "output": "portfolio/helpers.py",
+      "role": "helper"
+    },
+    {
+      "source": "libs/common/src/lib/calculation-helper.ts",
+      "output": "portfolio/calculation_helper.py",
+      "role": "helper"
+    }
+  ],
+  "imports": {
+    "@ghostfolio/api/app/portfolio/calculator/portfolio-calculator": {
+      "python_module": "app.wrapper.portfolio.calculator.portfolio_calculator",
+      "names": {"PortfolioCalculator": "PortfolioCalculator"}
+    },
+    "@ghostfolio/api/app/portfolio/interfaces/portfolio-order-item.interface": {
+      "python_module": null,
+      "skip": true,
+      "comment": "Not needed - using dicts"
+    },
+    "@ghostfolio/api/app/portfolio/interfaces/portfolio-order.interface": {
+      "python_module": null,
+      "skip": true
+    },
+    "@ghostfolio/api/app/portfolio/interfaces/transaction-point-symbol.interface": {
+      "python_module": null,
+      "skip": true
+    },
+    "@ghostfolio/api/app/portfolio/interfaces/transaction-point.interface": {
+      "python_module": null,
+      "skip": true
+    },
+    "@ghostfolio/api/app/portfolio/current-rate.service": {
+      "python_module": "app.wrapper.portfolio.current_rate_service",
+      "names": {"CurrentRateService": "CurrentRateService"}
+    },
+    "@ghostfolio/api/helper/portfolio.helper": {
+      "python_module": null,
+      "inline": true,
+      "comment": "getFactor is inlined as a simple helper"
+    },
+    "@ghostfolio/common/calculation-helper": {
+      "python_module": null,
+      "inline": true,
+      "comment": "getIntervalFromDateRange inlined"
+    },
+    "@ghostfolio/common/helper": {
+      "python_module": null,
+      "skip": true
+    },
+    "@ghostfolio/common/interfaces": {
+      "python_module": null,
+      "skip": true,
+      "comment": "TypeScript interfaces - not needed in Python"
+    },
+    "@ghostfolio/common/models": {
+      "python_module": null,
+      "skip": true
+    },
+    "@ghostfolio/common/types": {
+      "python_module": null,
+      "skip": true
+    },
+    "@ghostfolio/common/types/performance-calculation-type.type": {
+      "python_module": null,
+      "skip": true
+    },
+    "@ghostfolio/common/config": {
+      "python_module": null,
+      "skip": true,
+      "constants": {
+        "INVESTMENT_ACTIVITY_TYPES": ["BUY", "DIVIDEND", "SELL"]
+      }
+    },
+    "@nestjs/common": {
+      "python_module": null,
+      "skip": true,
+      "comment": "NestJS framework - not needed"
+    },
+    "@prisma/client": {
+      "python_module": null,
+      "skip": true
+    },
+    "big.js": {
+      "python_module": null,
+      "skip": true,
+      "comment": "Big.js replaced with float operations by codegen"
+    },
+    "class-transformer": {
+      "python_module": null,
+      "skip": true
+    },
+    "date-fns": {
+      "python_module": null,
+      "skip": true,
+      "comment": "date-fns functions inlined by codegen"
+    },
+    "lodash": {
+      "python_module": null,
+      "skip": true,
+      "comment": "lodash functions replaced with Python builtins by codegen"
+    }
+  },
+  "skip_patterns": [
+    "@ghostfolio/api/app/redis-cache",
+    "@ghostfolio/api/services/configuration",
+    "@ghostfolio/api/services/exchange-rate-data",
+    "@ghostfolio/api/services/queues",
+    "@ghostfolio/api/interceptors",
+    "@ghostfolio/api/services/interfaces",
+    "@ghostfolio/api/app/portfolio/interfaces/snapshot-value"
+  ]
+}
