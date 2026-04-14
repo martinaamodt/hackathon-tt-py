@@ -1,0 +1,28 @@
+{
+  "description": "Import map for Ghostfolio TypeScript to Python translation",
+  "import_paths": {
+    "@ghostfolio/api/app/portfolio/calculator/portfolio-calculator": "app.wrapper.portfolio.calculator.portfolio_calculator",
+    "@ghostfolio/api/app/portfolio/interfaces/portfolio-order-item.interface": null,
+    "@ghostfolio/api/helper/portfolio.helper": null,
+    "@ghostfolio/common/calculation-helper": null,
+    "@ghostfolio/common/helper": null,
+    "@ghostfolio/common/interfaces": null,
+    "@ghostfolio/common/models": null,
+    "@ghostfolio/common/types": null,
+    "@ghostfolio/common/types/performance-calculation-type.type": null,
+    "@ghostfolio/common/config": null,
+    "@nestjs/common": null,
+    "big.js": "decimal",
+    "date-fns": null,
+    "lodash": null,
+    "class-transformer": null,
+    "@prisma/client": null
+  },
+  "type_mappings": {
+    "Big": "Decimal",
+    "Date": "datetime",
+    "string": "str",
+    "number": "float",
+    "boolean": "bool"
+  }
+}
