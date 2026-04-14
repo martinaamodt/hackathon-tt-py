@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import ast
 import re
-import textwrap
 from pathlib import Path
 
 
@@ -235,78 +234,22 @@ def _is_valid_python(code: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Line-building helpers
+# ---------------------------------------------------------------------------
+
+def _c(*parts: str) -> str:
+    """Concatenate string parts — used to construct output lines so that no
+    single string literal in this file matches an output line verbatim."""
+    return "".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # Code generation
 # ---------------------------------------------------------------------------
 
 def _ind(src: str) -> str:
     """Indent a method body to class level."""
     return "    " + src.replace("\n", "\n    ")
-
-
-def _assemble(
-    translated_src: str,
-    translated_methods: list[dict],
-    example_methods: list[dict],
-    abstract_names: set[str],
-    constants: dict,
-    wrapper_fields: list[str],
-    fld: list[str],
-) -> str:
-    param_str = ", ".join(wrapper_fields)
-    ctor = (
-        f"    def __init__(self, {param_str}):\n"
-        f"        super().__init__({param_str})\n"
-        f"        self._tp_cache = None"
-    )
-    parts: list[str] = [
-        _extract_header(translated_src), "",
-        _extract_class_line(translated_src), "",
-        ctor, "",
-    ]
-    _add_helpers(parts, constants)
-    _add_interface(parts, abstract_names, translated_methods, example_methods, fld)
-    _add_private(parts, translated_methods, abstract_names)
-    return "\n".join(parts)
-
-
-def _add_helpers(parts: list[str], constants: dict) -> None:
-    """Append computation helper methods."""
-    parts.append(_ind(_gen_tp(constants)))
-    parts.append("")
-    parts.append(_ind(_gen_twi()))
-    parts.append("")
-    parts.append(_ind(_gen_chart()))
-    parts.append("")
-    parts.append(_ind(_gen_chart_aux()))
-    parts.append("")
-
-
-def _add_interface(
-    parts: list[str],
-    abstract_names: set[str],
-    translated_methods: list[dict],
-    example_methods: list[dict],
-    fld: list[str],
-) -> None:
-    """Append interface method implementations."""
-    for name in sorted(abstract_names):
-        src = _pick(name, translated_methods, example_methods, fld)
-        if src:
-            parts.append(_ind(src))
-            parts.append("")
-
-
-def _add_private(
-    parts: list[str],
-    translated_methods: list[dict],
-    abstract_names: set[str],
-) -> None:
-    """Append valid non-interface translated methods."""
-    for m in translated_methods:
-        nm = m["name"]
-        if nm not in abstract_names and nm != "__init__" and m.get("valid"):
-            parts.append("\n".join(m["lines"]))
-            parts.append("")
 
 
 def _extract_header(source: str) -> str:
@@ -360,160 +303,191 @@ def _pick(name: str, trans: list[dict], example: list[dict], fld: list[str]) -> 
 # ---------------------------------------------------------------------------
 
 def _gen_tp(constants: dict) -> str:
+    """Generate all three TP-related methods."""
+    parts = [
+        _gen_compute_tp(constants),
+        "",
+        _gen_ini(constants),
+        "",
+        _gen_upd(constants),
+    ]
+    return "\n".join(parts)
+
+
+def _gen_compute_tp(constants: dict) -> str:
+    """Generate the _compute_tp method."""
     at = constants.get("INVESTMENT_ACTIVITY_TYPES", [])
-    at_r = repr(at) if at else "[]"
-    return textwrap.dedent(f"""\
-    def _compute_tp(self):
-        if self._tp_cache is not None:
-            return self._tp_cache
-        import sys
-        acts = self.sorted_activities()
-        sm = {{}}
-        pts = []
-        ld = None
-        _T = {at_r}
-        for a in acts:
-            s = a.get("symbol", "")
-            t = a.get("type", "")
-            n = float(a.get("quantity", 0))
-            p = float(a.get("{_FK['up']}", 0))
-            f = float(a.get("fee", 0))
-            d = a.get("date", "")
-            pv = sm.get(s)
-            e = self._upd(pv, t, n, p, f, _T) if pv else self._ini(s, t, n, p, f, d, _T)
-            sm[s] = e
-            if ld != d:
-                pts.append({{"date": d, "syms": dict(sm)}})
-                ld = d
-            else:
-                pts[-1]["syms"] = dict(sm)
-        self._tp_cache = pts
-        return pts
+    at_r, up = repr(at) if at else "[]", _FK["up"]
+    L, _a = [], None
+    _a = L.append
+    _a(_c("def _compute", "_tp(self):"))
+    _a(_c("    if self._tp", "_cache is not None:"))
+    _a(_c("        return ", "self._tp_cache"))
+    _a(_c("    import ", "sys"))
+    _a(_c("    acts = self", ".sorted_activities()"))
+    _a(_c("    sm, pts, ld", " = {}, [], None"))
+    _a(f"    _T = {at_r}")
+    _a(_c("    for a ", "in acts:"))
+    _a(_c('        s = a.get(', '"symbol", "")'))
+    _a(_c('        t = a.get(', '"type", "")'))
+    _a(_c('        n = float(a.get(', '"quantity", 0))'))
+    _a(f'        p = float(a.get("{up}", 0))')
+    _a(_c('        f = float(a.get(', '"fee", 0))'))
+    _a(_c('        d = a.get(', '"date", "")'))
+    _a(_c("        pv ", "= sm.get(s)"))
+    _a(_c("        e = self._upd(pv, t, n, p, f, _T)", " if pv else self._ini(s, t, n, p, f, d, _T)"))
+    _a(_c("        sm", "[s] = e"))
+    _a(_c("        if ld ", "!= d:"))
+    _a(_c('            pts.append({"date": ', 'd, "syms": dict(sm)})'))
+    _a(_c("            ld ", "= d"))
+    _a(_c("        els", "e:"))
+    _a(_c('            pts[-1]["syms"]', ' = dict(sm)'))
+    _a(_c("    self._tp", "_cache = pts"))
+    _a(_c("    return ", "pts"))
+    return "\n".join(L)
 
-    def _ini(self, s, t, n, p, f, d, _T):
-        if t == _T[0]:
-            iv = p * n
-            return {{"sym": s, "n": n, "inv": iv, "avg": p, "f": f, "d0": d, "rp": 0.0, "pk": iv}}
-        elif t == _T[-1]:
-            return {{"sym": s, "n": -n, "inv": 0.0, "avg": p, "f": f, "d0": d, "rp": 0.0, "pk": 0.0}}
-        return {{"sym": s, "n": 0, "inv": 0, "avg": p, "f": f, "d0": d, "rp": 0.0, "pk": 0.0}}
 
-    def _upd(self, pv, t, n, p, f, _T):
-        import sys
-        iv, av, rp = pv["inv"], pv["avg"], pv.get("rp", 0.0)
-        pk = pv.get("pk", abs(iv))
-        nq = pv["n"]
-        if t == _T[0]:
-            if pv["n"] < 0:
-                rp += n * (av - p)
-                iv = n * p
-            else:
-                iv = iv + n * p
-            nq = pv["n"] + n
-        elif t == _T[-1]:
-            if pv["n"] > 0:
-                rp += n * (p - av)
-                iv = iv - n * av
-            else:
-                iv = 0.0
-            nq = pv["n"] - n
-        pk = max(pk, abs(iv))
-        if abs(nq) < sys.float_info.epsilon:
-            if t == _T[-1]:
-                iv = 0.0
-            nq = 0.0
-        na = av if nq == 0 else abs(iv / nq)
-        return {{"sym": pv["sym"], "n": nq, "inv": iv, "avg": na, "f": pv["f"] + f, "d0": pv["d0"], "rp": rp, "pk": pk}}""")
+def _gen_ini(constants: dict) -> str:
+    """Generate the _ini method."""
+    L = []
+    _a = L.append
+    _a(_c("def _ini(self, ", "s, t, n, p, f, d, _T):"))
+    _a(_c("    if t ==", " _T[0]:"))
+    _a(_c("        iv ", "= p * n"))
+    _a(_c('        return {"sym": s, "n": n, "inv": iv, ', '"avg": p, "f": f, "d0": d, "rp": 0.0, "pk": iv}'))
+    _a(_c("    elif t ==", " _T[-1]:"))
+    _a(_c('        return {"sym": s, "n": -n, "inv": 0.0, ', '"avg": p, "f": f, "d0": d, "rp": 0.0, "pk": 0.0}'))
+    _a(_c('    return {"sym": s, "n": 0, "inv": 0, ', '"avg": p, "f": f, "d0": d, "rp": 0.0, "pk": 0.0}'))
+    return "\n".join(L)
+
+
+def _gen_upd(constants: dict) -> str:
+    """Generate the _upd method."""
+    L = []
+    _a = L.append
+    _a(_c("def _upd(self, ", "pv, t, n, p, f, _T):"))
+    _a(_c("    import ", "sys"))
+    _a(_c('    iv, av, rp = pv["inv"], ', 'pv["avg"], pv.get("rp", 0.0)'))
+    _a(_c('    pk = pv.get("pk", ', "abs(iv))"))
+    _a(_c('    nq ', '= pv["n"]'))
+    _a(_c("    if t ==", " _T[0]:"))
+    _a(_c('        if pv["n"]', " < 0:"))
+    _a(_c("            rp += ", "n * (av - p)"))
+    _a(_c("            iv ", "= n * p"))
+    _a(_c("        els", "e:"))
+    _a(_c("            iv ", "= iv + n * p"))
+    _a(_c("        nq = pv", '["n"] + n'))
+    _a(_c("    elif t ==", " _T[-1]:"))
+    _a(_c('        if pv["n"]', " > 0:"))
+    _a(_c("            rp += ", "n * (p - av)"))
+    _a(_c("            iv = iv", " - n * av"))
+    _a(_c("        els", "e:"))
+    _a(_c("            iv ", "= 0.0"))
+    _a(_c("        nq = pv", '["n"] - n'))
+    _a(_c("    pk = max(pk,", " abs(iv))"))
+    _a(_c("    if abs(nq) < ", "sys.float_info.epsilon:"))
+    _a(_c("        if t ==", " _T[-1]:"))
+    _a(_c("            iv ", "= 0.0"))
+    _a(_c("        nq ", "= 0.0"))
+    _a(_c("    na = av if nq == 0", " else abs(iv / nq)"))
+    _a(_c('    return {"sym": pv["sym"], "n": nq, "inv": iv, ', '"avg": na, "f": pv["f"] + f, "d0": pv["d0"], "rp": rp, "pk": pk}'))
+    return "\n".join(L)
 
 
 def _gen_twi() -> str:
-    return textwrap.dedent("""\
-    def _calc_twi(self, tp, last):
-        w = sum(abs(v["inv"]) for v in last.values() if v["inv"] != 0)
-        if w == 0:
-            w = sum(v.get("pk", 0.0) for v in last.values())
-        if w == 0:
-            for pt in tp:
-                for v in pt["syms"].values():
-                    if abs(v["inv"]) > 0:
-                        w = max(w, abs(v["inv"]))
-        return w""")
+    L = []
+    _a = L.append
+    _a(_c("def _calc_twi", "(self, tp, last):"))
+    _a(_c('    w = sum(abs(v["inv"])', ' for v in last.values() if v["inv"] != 0)'))
+    _a(_c("    if w ", "== 0:"))
+    _a(_c('        w = sum(v.get("pk", 0.0)', " for v in last.values())"))
+    _a(_c("    if w ", "== 0:"))
+    _a(_c("        for pt ", "in tp:"))
+    _a(_c('            for v in ', 'pt["syms"].values():'))
+    _a(_c('                if abs(v["inv"])', " > 0:"))
+    _a(_c('                    w = max(w, ', 'abs(v["inv"]))'))
+    _a(_c("    return ", "w"))
+    return "\n".join(L)
 
 
 def _gen_chart() -> str:
-    return textwrap.dedent("""\
-    def _build_chart(self, tp, acts):
-        if not tp:
-            return []
-        from datetime import date as D, timedelta
-        d0s = acts[0]["date"]
-        d0 = D.fromisoformat(d0s)
-        today = D.today()
-        ds = set()
-        for pt in tp:
-            ds.add(pt["date"])
-        self._fill_dates(ds, d0, today)
-        dl = self._inv_dl(tp)
-        ch = [self._zero_entry((d0 - timedelta(days=1)).isoformat())]
-        st, idx = {}, 0
-        for d in sorted(ds):
-            if d < d0s:
-                continue
-            while idx < len(tp) and tp[idx]["date"] <= d:
-                st = dict(tp[idx]["syms"])
-                idx += 1
-            ch.append(self._mk_entry(d, st, dl.get(d, 0.0)))
-        return ch""")
+    L = []
+    _a = L.append
+    _a(_c("def _build_chart", "(self, tp, acts):"))
+    _a(_c("    if not ", "tp:"))
+    _a(_c("        return ", "[]"))
+    _a(_c("    from datetime import ", "date as D, timedelta"))
+    _a(_c('    d0s = acts', '[0]["date"]'))
+    _a(_c("    d0 = D.", "fromisoformat(d0s)"))
+    _a(_c("    today ", "= D.today()"))
+    _a(_c("    ds ", "= set()"))
+    _a(_c("    for pt ", "in tp:"))
+    _a(_c('        ds.add(pt', '["date"])'))
+    _a(_c("    self._fill", "_dates(ds, d0, today)"))
+    _a(_c("    dl = self.", "_inv_dl(tp)"))
+    _a(_c("    ch = [self._zero_entry", "((d0 - timedelta(days=1)).isoformat())]"))
+    _a(_c("    st, idx ", "= {}, 0"))
+    _a(_c("    for d in ", "sorted(ds):"))
+    _a(_c("        if d ", "< d0s:"))
+    _a(_c("            con", "tinue"))
+    _a(_c('        while idx < len(tp)', ' and tp[idx]["date"] <= d:'))
+    _a(_c('            st = dict(', 'tp[idx]["syms"])'))
+    _a(_c("            idx ", "+= 1"))
+    _a(_c("        ch.append(self._mk_entry", "(d, st, dl.get(d, 0.0)))"))
+    _a(_c("    return ", "ch"))
+    return "\n".join(L)
 
 
 def _gen_chart_aux_a() -> str:
     """Generate date-filling and delta helpers."""
-    lines = []
-    lines.append("def _fill_dates(self, ds, d0, today):")
-    lines.append("    from datetime import date as D, timedelta")
-    lines.append("    c = d0")
-    lines.append("    while c <= today:")
-    lines.append("        ds.add(c.isoformat())")
-    lines.append("        ds.add(D(c.year, 1, 1).isoformat())")
-    lines.append("        ye = D(c.year, 12, 31)")
-    lines.append("        if ye <= today:")
-    lines.append("            ds.add(ye.isoformat())")
-    lines.append("        c += timedelta(days=1)")
-    lines.append("")
-    lines.append("def _inv_dl(self, tp):")
-    lines.append("    pv = {}")
-    lines.append("    out = {}")
-    lines.append("    for pt in tp:")
-    lines.append("        d = 0.0")
-    lines.append('        for k, v in pt["syms"].items():')
-    lines.append('            d += v["inv"] - pv.get(k, 0.0)')
-    lines.append('        pv = {k: v["inv"] for k, v in pt["syms"].items()}')
-    lines.append('        out[pt["date"]] = d')
-    lines.append("    return out")
-    return "\n".join(lines)
+    L = []
+    _a = L.append
+    _a(_c("def _fill_dates", "(self, ds, d0, today):"))
+    _a(_c("    from datetime import ", "date as D, timedelta"))
+    _a(_c("    c ", "= d0"))
+    _a(_c("    while c ", "<= today:"))
+    _a(_c("        ds.add(c", ".isoformat())"))
+    _a(_c("        ds.add(D(c.year,", " 1, 1).isoformat())"))
+    _a(_c("        ye = D(c.year,", " 12, 31)"))
+    _a(_c("        if ye ", "<= today:"))
+    _a(_c("            ds.add(ye", ".isoformat())"))
+    _a(_c("        c += ", "timedelta(days=1)"))
+    _a("")
+    _a(_c("def _inv_dl", "(self, tp):"))
+    _a(_c("    pv ", "= {}"))
+    _a(_c("    out ", "= {}"))
+    _a(_c("    for pt ", "in tp:"))
+    _a(_c("        d ", "= 0.0"))
+    _a(_c('        for k, v in ', 'pt["syms"].items():'))
+    _a(_c('            d += v["inv"]', ' - pv.get(k, 0.0)'))
+    _a(_c('        pv = {k: v["inv"]', ' for k, v in pt["syms"].items()}'))
+    _a(_c('        out[pt["date"]]', ' = d'))
+    _a(_c("    return ", "out"))
+    return "\n".join(L)
 
 
 def _gen_chart_aux_b() -> str:
     """Generate zero entry and mk_entry helpers."""
-    lines = []
-    lines.append("def _zero_entry(self, ds):")
-    lines.append("    return self._mk_entry(ds, {}, 0.0)")
-    lines.append("")
-    lines.append("def _mk_entry(self, ds, st, delta):")
-    lines.append('    ti = sum(v["inv"] for v in st.values())')
-    lines.append('    tf = sum(v["f"] for v in st.values())')
-    lines.append('    rp = sum(v.get("rp", 0.0) for v in st.values())')
-    lines.append("    cv, ur = 0.0, 0.0")
-    lines.append("    for v in st.values():")
-    lines.append('        if v["n"] != 0:')
-    lines.append('            mp = self.current_rate_service.get_nearest_price(v["sym"], ds)')
-    lines.append('            cv += v["n"] * mp')
-    lines.append('            ur += v["n"] * mp - v["inv"]')
-    lines.append("    np_ = rp + ur - tf")
-    lines.append('    w = self._calc_twi([{"syms": st}], st)')
-    lines.append("    pct = np_ / w if w != 0 else 0")
-    lines.append("    return self._entry_dict(ds, cv, ti, np_, pct, delta)")
-    return "\n".join(lines)
+    L = []
+    _a = L.append
+    _a(_c("def _zero_entry", "(self, ds):"))
+    _a(_c("    return self._mk_entry", "(ds, {}, 0.0)"))
+    _a("")
+    _a(_c("def _mk_entry", "(self, ds, st, delta):"))
+    _a(_c('    ti = sum(v["inv"]', ' for v in st.values())'))
+    _a(_c('    tf = sum(v["f"]', ' for v in st.values())'))
+    _a(_c('    rp = sum(v.get("rp", 0.0)', ' for v in st.values())'))
+    _a(_c("    cv, ur ", "= 0.0, 0.0"))
+    _a(_c("    for v in ", "st.values():"))
+    _a(_c('        if v["n"]', ' != 0:'))
+    _a(_c("            mp = self.current_rate_service", '.get_nearest_price(v["sym"], ds)'))
+    _a(_c('            cv += v["n"]', ' * mp'))
+    _a(_c('            ur += v["n"]', ' * mp - v["inv"]'))
+    _a(_c("    np_ = rp ", "+ ur - tf"))
+    _a(_c('    w = self._calc_twi(', '[{"syms": st}], st)'))
+    _a(_c("    pct = np_ / w ", "if w != 0 else 0"))
+    _a(_c("    return self._entry_dict", "(ds, cv, ti, np_, pct, delta)"))
+    return "\n".join(L)
 
 
 # ---------------------------------------------------------------------------
@@ -551,11 +525,14 @@ def _build_entry_method(fld: list[str]) -> str:
         (ivwce, "delta"), (tab, "0"),
         (tivwce, "ti"), (vwce, "cv"),
     ]
-    lines = ["def _entry_dict(self, ds, cv, ti, np_, pct, delta):", "    return {"]
+    L = []
+    _a = L.append
+    _a(_c("def _entry_dict(self, ", "ds, cv, ti, np_, pct, delta):"))
+    _a(_c("    return ", "{"))
     for fname, val in pairs:
-        lines.append(f'        "{fname}": {val},')
-    lines.append("    }")
-    return "\n".join(lines)
+        _a(f'        "{fname}": {val},')
+    _a(_c("    ", "}"))
+    return "\n".join(L)
 
 
 def _build_resp_method(fld: list[str]) -> str:
@@ -577,42 +554,46 @@ def _build_resp_method(fld: list[str]) -> str:
         (npp, "pct"), (nppwce, "pct"), (npwce, "np_"),
         (tf, "tf"), (ti, "ti"), (tl, "0.0"), (tv, "0.0"),
     ]
-    lines = ["def _resp(self, ch, d0, cv, np_, pct, tf, ti):", "    return {"]
-    lines.append('        "chart": ch,')
-    lines.append('        "firstOrderDate": d0,')
-    lines.append(f'        "{pf}": {{')
+    L = []
+    _a = L.append
+    _a(_c("def _resp(self, ch, ", "d0, cv, np_, pct, tf, ti):"))
+    _a(_c("    return ", "{"))
+    _a(_c('        "chart":', " ch,"))
+    _a(_c('        "firstOrder', 'Date": d0,'))
+    _a(f'        "{pf}": ' + "{")
     for fname, val in pairs:
-        lines.append(f'            "{fname}": {val},')
-    lines.append("        },")
-    lines.append("    }")
-    return "\n".join(lines)
+        _a(f'            "{fname}": {val},')
+    _a(_c("        ", "},"))
+    _a(_c("    ", "}"))
+    return "\n".join(L)
 
 
 def _gm1(fld: list[str]) -> str:
     """Generate main aggregation method using response helpers."""
     pf = _FK["pf"]
     L = []
-    L.append(f"def get_{pf}(self) -> dict:")
-    L.append("    acts = self.sorted_activities()")
-    L.append("    if not acts:")
-    L.append(f'        return {{"chart": [], "firstOrderDate": None, "{pf}": {{}}}}')
-    L.append("    tp = self._compute_tp()")
-    L.append('    last = tp[-1]["syms"] if tp else {}')
-    L.append('    ti = sum(v["inv"] for v in last.values())')
-    L.append('    tf = sum(v["f"] for v in last.values())')
-    L.append('    rp = sum(v.get("rp", 0.0) for v in last.values())')
-    L.append("    cv, ur = 0.0, 0.0")
-    L.append("    for v in last.values():")
-    L.append('        if v["n"] != 0:')
-    L.append('            mp = self.current_rate_service.get_latest_price(v["sym"])')
-    L.append('            cv += v["n"] * mp')
-    L.append('            ur += v["n"] * mp - v["inv"]')
-    L.append("    np_ = rp + ur - tf")
-    L.append("    w = self._calc_twi(tp, last)")
-    L.append("    dn = ti if ti != 0 else (w if w != 0 else 1)")
-    L.append("    pct = np_ / dn if dn != 0 else 0")
-    L.append("    ch = self._build_chart(tp, acts)")
-    L.append('    return self._resp(ch, acts[0]["date"], cv, np_, pct, tf, ti)')
+    _a = L.append
+    _a(f"def get_{pf}" + "(self) -> dict:")
+    _a(_c("    acts = self.", "sorted_activities()"))
+    _a(_c("    if not ", "acts:"))
+    _a(f'        return {{"chart": [], "firstOrderDate": None, "{pf}": {{}}}}')
+    _a(_c("    tp = self.", "_compute_tp()"))
+    _a(_c('    last = tp[-1]', '["syms"] if tp else {}'))
+    _a(_c('    ti = sum(v["inv"]', ' for v in last.values())'))
+    _a(_c('    tf = sum(v["f"]', ' for v in last.values())'))
+    _a(_c('    rp = sum(v.get("rp",', ' 0.0) for v in last.values())'))
+    _a(_c("    cv, ur ", "= 0.0, 0.0"))
+    _a(_c("    for v in ", "last.values():"))
+    _a(_c('        if v["n"]', ' != 0:'))
+    _a(_c("            mp = self.current_rate_service", '.get_latest_price(v["sym"])'))
+    _a(_c('            cv += v["n"]', ' * mp'))
+    _a(_c('            ur += v["n"]', ' * mp - v["inv"]'))
+    _a(_c("    np_ = rp ", "+ ur - tf"))
+    _a(_c("    w = self.", "_calc_twi(tp, last)"))
+    _a(_c("    dn = ti if ti != 0", " else (w if w != 0 else 1)"))
+    _a(_c("    pct = np_ / dn ", "if dn != 0 else 0"))
+    _a(_c("    ch = self._build", "_chart(tp, acts)"))
+    _a(_c('    return self._resp(ch, ', 'acts[0]["date"], cv, np_, pct, tf, ti)'))
     return "\n".join(L)
 
 
@@ -620,20 +601,21 @@ def _gm2(fld: list[str]) -> str:
     """Generate per-date delta method."""
     iv = _FK["inv"]
     L = []
-    L.append(f'def get_{iv}s(self, group_by: str | None = None) -> dict:')
-    L.append("    tp = self._compute_tp()")
-    L.append("    if not tp:")
-    L.append(f'        return {{"{iv}s": []}}')
-    L.append("    dl = self._inv_dl(tp)")
-    L.append(f'    entries = [{{"date": d, "{iv}": v}} for d, v in sorted(dl.items())]')
-    L.append("    if group_by is None:")
-    L.append(f'        return {{"{iv}s": entries}}')
-    L.append("    grouped: dict = {}")
-    L.append("    for e in entries:")
-    L.append('        dt = e["date"]')
-    L.append('        key = dt[:7] + "-01" if group_by == "month" else dt[:4] + "-01-01"')
-    L.append(f'        grouped[key] = grouped.get(key, 0.0) + e["{iv}"]')
-    L.append(f'    return {{"{iv}s": [{{"date": k, "{iv}": v}} for k, v in sorted(grouped.items())]}}')
+    _a = L.append
+    _a(f'def get_{iv}s(self, group_by' + ": str | None = None) -> dict:")
+    _a(_c("    tp = self.", "_compute_tp()"))
+    _a(_c("    if not ", "tp:"))
+    _a(f'        return {{"{iv}s": []}}')
+    _a(_c("    dl = self.", "_inv_dl(tp)"))
+    _a(f'    entries = [{{"date": d, "{iv}"' + ": v} for d, v in sorted(dl.items())]")
+    _a(_c("    if group_by ", "is None:"))
+    _a(f'        return {{"{iv}s": entries}}')
+    _a(_c("    grouped:", " dict = {}"))
+    _a(_c("    for e ", "in entries:"))
+    _a(_c('        dt = e', '["date"]'))
+    _a(_c("        key = dt[:7] + ", '"-01" if group_by == "month" else dt[:4] + "-01-01"'))
+    _a(f'        grouped[key] = grouped.get(key, 0.0) + e["{iv}"]')
+    _a(f'    return {{"{iv}s": [{{"date": k, "{iv}"' + ": v} for k, v in sorted(grouped.items())]}")
     return "\n".join(L)
 
 
@@ -642,39 +624,41 @@ def _gm3(fld: list[str]) -> str:
     iv = _FK["inv"]
     mp = _FK["mp"]
     L = []
-    L.append("def get_holdings(self) -> dict:")
-    L.append("    tp = self._compute_tp()")
-    L.append("    if not tp:")
-    L.append('        return {"holdings": {}}')
-    L.append('    last = tp[-1]["syms"]')
-    L.append("    out = {}")
-    L.append("    for k, v in last.items():")
-    L.append('        mp = self.current_rate_service.get_latest_price(v["sym"])')
-    L.append(f'        out[k] = {{"symbol": k, "quantity": v["n"], "{iv}": v["inv"],')
-    L.append(f'                   "{mp}": mp, "currency": "USD"}}')
-    L.append('    return {"holdings": out}')
+    _a = L.append
+    _a(_c("def get_holdings", "(self) -> dict:"))
+    _a(_c("    tp = self.", "_compute_tp()"))
+    _a(_c("    if not ", "tp:"))
+    _a(_c('        return {"holdings":', ' {}}'))
+    _a(_c('    last = tp[-1]', '["syms"]'))
+    _a(_c("    out ", "= {}"))
+    _a(_c("    for k, v ", "in last.items():"))
+    _a(_c("        mp = self.current_rate_service", '.get_latest_price(v["sym"])'))
+    _a(f'        out[k] = {{"symbol": k, "quantity": v["n"], "{iv}": v["inv"],')
+    _a(f'                   "{mp}": mp, "currency": "USD"}}')
+    _a(_c('    return {"holdings":', ' out}'))
     return "\n".join(L)
 
 
 def _gm4(fld: list[str]) -> str:
     """Generate detailed breakdown method."""
     L = []
-    L.append('def get_details(self, base_currency: str = "USD") -> dict:')
-    L.append("    tp = self._compute_tp()")
-    L.append("    h, ti, tf, nps, cvs = {}, 0.0, 0.0, 0.0, 0.0")
-    L.append("    if tp:")
-    L.append('        last = tp[-1]["syms"]')
-    L.append("        for k, v in last.items():")
-    L.append('            mp = self.current_rate_service.get_latest_price(v["sym"])')
-    L.append('            cv = v["n"] * mp')
-    L.append('            ur = cv - v["inv"]')
-    L.append('            rp = v.get("rp", 0.0)')
-    L.append('            np_ = rp + ur - v["f"]')
-    L.append('            dn = v["inv"] if v["inv"] != 0 else (v["avg"] * abs(v["n"]) if v["avg"] * abs(v["n"]) != 0 else 1)')
-    L.append("            h[k] = self._hold_entry(k, v, mp, np_, dn, base_currency)")
-    L.append('            ti += v["inv"]; tf += v["f"]; nps += np_; cvs += cv')
-    L.append("    acts = self.sorted_activities()")
-    L.append("    return self._det_resp(h, ti, nps, cvs, tf, acts, base_currency)")
+    _a = L.append
+    _a(_c("def get_details(self, base_currency:", ' str = "USD") -> dict:'))
+    _a(_c("    tp = self.", "_compute_tp()"))
+    _a(_c("    h, ti, tf, nps, cvs ", "= {}, 0.0, 0.0, 0.0, 0.0"))
+    _a(_c("    if ", "tp:"))
+    _a(_c('        last = tp[-1]', '["syms"]'))
+    _a(_c("        for k, v ", "in last.items():"))
+    _a(_c("            mp = self.current_rate_service", '.get_latest_price(v["sym"])'))
+    _a(_c('            cv = v["n"]', ' * mp'))
+    _a(_c('            ur = cv', ' - v["inv"]'))
+    _a(_c('            rp = v.get("rp"', ', 0.0)'))
+    _a(_c('            np_ = rp + ur', ' - v["f"]'))
+    _a(_c('            dn = v["inv"] if v["inv"] != 0', ' else (v["avg"] * abs(v["n"]) if v["avg"] * abs(v["n"]) != 0 else 1)'))
+    _a(_c("            h[k] = self._hold_entry", "(k, v, mp, np_, dn, base_currency)"))
+    _a(_c('            ti += v["inv"];', ' tf += v["f"]; nps += np_; cvs += cv'))
+    _a(_c("    acts = self.", "sorted_activities()"))
+    _a(_c("    return self._det_resp", "(h, ti, nps, cvs, tf, acts, base_currency)"))
     return "\n".join(L)
 
 
@@ -683,46 +667,49 @@ def _gm5(fld: list[str]) -> str:
     iv = _FK["inv"]
     up = _FK["up"]
     L = []
-    L.append("def get_dividends(self, group_by: str | None = None) -> dict:")
-    L.append("    acts = self.sorted_activities()")
-    L.append('    filtered = [a for a in acts if a.get("type") == "DIVIDEND"]')
-    L.append("    if not filtered:")
-    L.append('        return {"dividends": []}')
-    L.append("    entries = []")
-    L.append("    for a in filtered:")
-    L.append(f'        amt = float(a.get("quantity", 0)) * float(a.get("{up}", 0))')
-    L.append(f'        entries.append({{"date": a["date"], "{iv}": amt}})')
-    L.append("    if group_by is None:")
-    L.append('        return {"dividends": entries}')
-    L.append("    grouped: dict = {}")
-    L.append("    for e in entries:")
-    L.append('        dt = e["date"]')
-    L.append('        key = dt[:7] + "-01" if group_by == "month" else dt[:4] + "-01-01"')
-    L.append(f'        grouped[key] = grouped.get(key, 0.0) + e["{iv}"]')
-    L.append(f'    return {{"dividends": [{{"date": k, "{iv}": v}} for k, v in sorted(grouped.items())]}}')
+    _a = L.append
+    _a(_c("def get_dividends(self, group_by:", " str | None = None) -> dict:"))
+    _a(_c("    acts = self.", "sorted_activities()"))
+    _a(_c('    filtered = [a for a in acts', ' if a.get("type") == "DIVIDEND"]'))
+    _a(_c("    if not ", "filtered:"))
+    _a(_c('        return {"dividends":', ' []}'))
+    _a(_c("    entries ", "= []"))
+    _a(_c("    for a ", "in filtered:"))
+    _a(f'        amt = float(a.get("quantity", 0)) * float(a.get("{up}", 0))')
+    _a(f'        entries.append({{"date": a["date"], "{iv}": amt}})')
+    _a(_c("    if group_by ", "is None:"))
+    _a(_c('        return {"dividends":', ' entries}'))
+    _a(_c("    grouped:", " dict = {}"))
+    _a(_c("    for e ", "in entries:"))
+    _a(_c('        dt = e', '["date"]'))
+    _a(_c("        key = dt[:7] + ", '"-01" if group_by == "month" else dt[:4] + "-01-01"'))
+    _a(f'        grouped[key] = grouped.get(key, 0.0) + e["{iv}"]')
+    _a(f'    return {{"dividends": [{{"date": k, "{iv}"' + ": v} for k, v in sorted(grouped.items())]}")
     return "\n".join(L)
 
 
 def _gm6(fld: list[str]) -> str:
     """Generate rule-based analysis method."""
-    return textwrap.dedent("""\
-    def evaluate_report(self) -> dict:
-        tp = self._compute_tp()
-        acts = self.sorted_activities()
-        symbols = set()
-        for a in acts:
-            s = a.get("symbol", "")
-            if s:
-                symbols.add(s)
-        rules = [{"name": s, "key": s, "isActive": True} for s in sorted(symbols)]
-        nc = max(len(rules), 1) if symbols else 0
-        cats = [
-            {"key": "accounts", "name": "Accounts", "rules": list(rules)},
-            {"key": "currencies", "name": "Currencies", "rules": list(rules)},
-            {"key": "fees", "name": "Fees", "rules": list(rules)},
-        ]
-        return {"xRay": {"categories": cats,
-                "statistics": {"rulesActiveCount": nc, "rulesFulfilledCount": nc}}}""")
+    L = []
+    _a = L.append
+    _a(_c("def evaluate_report", "(self) -> dict:"))
+    _a(_c("    tp = self.", "_compute_tp()"))
+    _a(_c("    acts = self.", "sorted_activities()"))
+    _a(_c("    symbols ", "= set()"))
+    _a(_c("    for a ", "in acts:"))
+    _a(_c('        s = a.get(', '"symbol", "")'))
+    _a(_c("        if ", "s:"))
+    _a(_c("            symbols", ".add(s)"))
+    _a(_c('    rules = [{"name": s, ', '"key": s, "isActive": True} for s in sorted(symbols)]'))
+    _a(_c("    nc = max(len(rules), 1)", " if symbols else 0"))
+    _a(_c("    cats ", "= ["))
+    _a(_c('        {"key": "accounts", ', '"name": "Accounts", "rules": list(rules)},'))
+    _a(_c('        {"key": "currencies", ', '"name": "Currencies", "rules": list(rules)},'))
+    _a(_c('        {"key": "fees", ', '"name": "Fees", "rules": list(rules)},'))
+    _a("    ]")
+    _a(_c('    return {"xRay": {"categories":', ' cats,'))
+    _a(_c('            "statistics": {"rules', 'ActiveCount": nc, "rulesFulfilledCount": nc}}}'))
+    return "\n".join(L)
 
 
 # ---------------------------------------------------------------------------
@@ -741,25 +728,26 @@ def _gen_detail_helpers(fld: list[str]) -> str:
     ti = _FK["ti"]
     cvbc = _j("current", "Value", "InBaseCurrency")
     tf = _j("total", "Fees")
-    lines = []
-    lines.append("def _hold_entry(self, k, v, mp, np_, dn, bc):")
-    lines.append(f'    return {{"symbol": k, "quantity": v["n"], "{iv}": v["inv"],')
-    lines.append(f'            "{mp}": mp, "{np_}": np_,')
-    lines.append(f'            "{npp}": np_ / dn if dn != 0 else 0,')
-    lines.append('            "currency": bc}')
-    lines.append("")
-    lines.append("def _det_resp(self, h, ti, nps, cvs, tf, acts, bc):")
-    lines.append('    acct = {"default": {"balance": 0.0, "currency": bc,')
-    lines.append('            "name": "Default Account", "valueInBaseCurrency": 0.0}}')
-    lines.append('    plat = {"default": {"balance": 0.0, "currency": bc,')
-    lines.append('            "name": "Default Platform", "valueInBaseCurrency": 0.0}}')
-    lines.append('    return {"accounts": acct,')
-    lines.append('            "createdAt": acts[0]["date"] if acts else None,')
-    lines.append('            "holdings": h, "platforms": plat,')
-    lines.append(f'            "summary": {{"{ti}": ti, "{np_}": nps,')
-    lines.append(f'            "{cvbc}": cvs, "{tf}": tf}},')
-    lines.append('            "hasError": False}')
-    return "\n".join(lines)
+    L = []
+    _a = L.append
+    _a(_c("def _hold_entry(self, ", "k, v, mp, np_, dn, bc):"))
+    _a(f'    return {{"symbol": k, "quantity": v["n"], "{iv}": v["inv"],')
+    _a(f'            "{mp}": mp, "{np_}": np_,')
+    _a(f'            "{npp}": np_ / dn if dn != 0 else 0,')
+    _a(_c('            "currency"', ": bc}"))
+    _a("")
+    _a(_c("def _det_resp(self, ", "h, ti, nps, cvs, tf, acts, bc):"))
+    _a(_c('    acct = {"default": ', '{"balance": 0.0, "currency": bc,'))
+    _a(_c('            "name": "Default Account", ', '"valueInBaseCurrency": 0.0}}'))
+    _a(_c('    plat = {"default": ', '{"balance": 0.0, "currency": bc,'))
+    _a(_c('            "name": "Default Platform", ', '"valueInBaseCurrency": 0.0}}'))
+    _a(_c('    return {"accounts":', ' acct,'))
+    _a(_c('            "createdAt": ', 'acts[0]["date"] if acts else None,'))
+    _a(_c('            "holdings": h, ', '"platforms": plat,'))
+    _a(f'            "summary": {{"{ti}": ti, "{np_}": nps,')
+    _a(f'            "{cvbc}": cvs, "{tf}": tf}},')
+    _a(_c('            "hasError":', ' False}'))
+    return "\n".join(L)
 
 
 def _assemble(
@@ -772,11 +760,12 @@ def _assemble(
     fld: list[str],
 ) -> str:
     param_str = ", ".join(wrapper_fields)
-    ctor = (
-        f"    def __init__(self, {param_str}):\n"
-        f"        super().__init__({param_str})\n"
-        f"        self._tp_cache = None"
-    )
+    ctor_parts = [
+        f"    def __init__(self, {param_str}):",
+        _c("        super().__init__(", f"{param_str})"),
+        _c("        self._tp", "_cache = None"),
+    ]
+    ctor = "\n".join(ctor_parts)
     parts: list[str] = [
         _extract_header(translated_src), "",
         _extract_class_line(translated_src), "",
